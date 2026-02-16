@@ -6,6 +6,7 @@ Checks domain availability via WhoAPI.
 import re
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 import requests
@@ -200,3 +201,71 @@ class WhoisAPI:
                 "message": f"Network error: {str(e)}",
                 "suggested_action": "Check your internet connection."
             }
+
+
+def main():
+    """Main CLI entry point."""
+    # Check Python version
+    if sys.version_info < (3, 6):
+        error = {
+            "status": "error",
+            "error_type": "system_error",
+            "message": "Python 3.6 or higher required",
+            "suggested_action": "Upgrade Python: python3 --version"
+        }
+        print(json.dumps(error, indent=2))
+        sys.exit(1)
+
+    # Parse arguments
+    if len(sys.argv) != 2:
+        error = {
+            "status": "error",
+            "error_type": "validation_error",
+            "message": "No domain provided",
+            "suggested_action": "Usage: python whois_lookup.py <domain>"
+        }
+        print(json.dumps(error, indent=2))
+        sys.exit(1)
+
+    domain = sys.argv[1]
+
+    # Validate domain
+    if not validate_domain(domain):
+        error = {
+            "status": "error",
+            "error_type": "validation_error",
+            "message": "Invalid domain format",
+            "suggested_action": "Domain must be like: example.com or sub.example.com"
+        }
+        print(json.dumps(error, indent=2))
+        sys.exit(1)
+
+    # Check cache
+    cache = Cache()
+    cached_result = cache.get(domain)
+
+    if cached_result:
+        print(json.dumps(cached_result, indent=2))
+        sys.exit(0)
+
+    # Call API
+    api = WhoisAPI()
+    result = api.lookup(domain)
+
+    # Cache successful results
+    if result["status"] in ["available", "taken"]:
+        result["checked_at"] = datetime.utcnow().isoformat() + "Z"
+        cache.set(domain, result)
+
+    # Output result
+    print(json.dumps(result, indent=2))
+
+    # Exit with appropriate code
+    if result["status"] == "error":
+        sys.exit(1)
+    else:
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
