@@ -5,8 +5,10 @@ Checks domain availability via WhoAPI.
 """
 import re
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
+import requests
 
 
 def validate_domain(domain):
@@ -96,3 +98,105 @@ class Cache:
         except (IOError, OSError):
             # Fail gracefully if can't write cache
             pass
+
+
+class WhoisAPI:
+    """Client for WhoAPI whois lookups."""
+
+    API_BASE_URL = "https://api.whoapi.com/"
+    TIMEOUT_SECONDS = 10
+
+    def __init__(self, api_token=None):
+        """Initialize API client.
+
+        Args:
+            api_token: WhoAPI token. If None, will try WHOAPI_TOKEN env var.
+        """
+        if api_token is None:
+            api_token = os.environ.get("WHOAPI_TOKEN")
+
+        self.api_token = api_token
+
+    def lookup(self, domain):
+        """Lookup domain via WhoAPI.
+
+        Args:
+            domain: Domain name to lookup
+
+        Returns:
+            dict: Result with status (available/taken/error) and details
+        """
+        if not self.api_token:
+            return {
+                "status": "error",
+                "error_type": "configuration_error",
+                "message": "API token not set. Set WHOAPI_TOKEN environment variable.",
+                "suggested_action": "Run: export WHOAPI_TOKEN=your_token_here"
+            }
+
+        try:
+            response = requests.get(
+                self.API_BASE_URL,
+                params={
+                    "domain": domain,
+                    "apikey": self.api_token
+                },
+                timeout=self.TIMEOUT_SECONDS
+            )
+
+            if response.status_code == 401:
+                return {
+                    "status": "error",
+                    "error_type": "api_error",
+                    "message": "API key invalid or missing.",
+                    "suggested_action": "Check your WHOAPI_TOKEN environment variable."
+                }
+
+            if response.status_code == 429:
+                return {
+                    "status": "error",
+                    "error_type": "api_error",
+                    "message": "API rate limit reached.",
+                    "suggested_action": "Try again later. Cached results still work!"
+                }
+
+            if response.status_code != 200:
+                return {
+                    "status": "error",
+                    "error_type": "api_error",
+                    "message": f"API returned status {response.status_code}",
+                    "suggested_action": "Try again later or check WhoAPI status."
+                }
+
+            data = response.json()
+
+            # Parse response
+            if not data.get("domain_registered", True):
+                return {
+                    "status": "available",
+                    "domain": domain
+                }
+            else:
+                return {
+                    "status": "taken",
+                    "domain": domain,
+                    "registrant": data.get("registrant_name", "Unknown"),
+                    "expires": data.get("expiration_date", "Unknown"),
+                    "registrar": data.get("registrar_name", "Unknown")
+                }
+
+        except requests.Timeout:
+            return {
+                "status": "error",
+                "error_type": "api_error",
+                "message": "API request timeout after 10 seconds.",
+                "suggested_action": "Check your internet connection and try again."
+            }
+
+        except requests.RequestException as e:
+            return {
+                "status": "error",
+                "error_type": "api_error",
+                "message": f"Network error: {str(e)}",
+                "suggested_action": "Check your internet connection."
+            }

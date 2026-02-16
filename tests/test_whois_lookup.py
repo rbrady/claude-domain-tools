@@ -5,7 +5,7 @@ import os
 # Add scripts directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 
-from whois_lookup import validate_domain, Cache
+from whois_lookup import validate_domain, Cache, WhoisAPI
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -83,3 +83,91 @@ class TestCache:
         cache.set("test.com", data)
 
         assert cache_path.exists()
+
+
+class TestWhoisAPI:
+    def test_api_requires_token(self):
+        """Test that API requires token to be set."""
+        api = WhoisAPI(api_token=None)
+        result = api.lookup("example.com")
+
+        assert result["status"] == "error"
+        assert result["error_type"] == "configuration_error"
+        assert "API token" in result["message"]
+
+    def test_api_lookup_success_available(self, mocker):
+        """Test successful API lookup for available domain."""
+        # Mock the requests.get call
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "status": 0,  # WhoAPI returns 0 for success
+            "domain_registered": False
+        }
+        mocker.patch("requests.get", return_value=mock_response)
+
+        api = WhoisAPI(api_token="test_token")
+        result = api.lookup("example.com")
+
+        assert result["status"] == "available"
+        assert result["domain"] == "example.com"
+
+    def test_api_lookup_success_taken(self, mocker):
+        """Test successful API lookup for taken domain."""
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "status": 0,
+            "domain_registered": True,
+            "registrant_name": "Example Corp",
+            "expiration_date": "2027-01-15",
+            "registrar_name": "Example Registrar Inc"
+        }
+        mocker.patch("requests.get", return_value=mock_response)
+
+        api = WhoisAPI(api_token="test_token")
+        result = api.lookup("example.com")
+
+        assert result["status"] == "taken"
+        assert result["domain"] == "example.com"
+        assert result["registrant"] == "Example Corp"
+        assert result["expires"] == "2027-01-15"
+        assert result["registrar"] == "Example Registrar Inc"
+
+    def test_api_lookup_rate_limit(self, mocker):
+        """Test handling of rate limit errors."""
+        mock_response = mocker.Mock()
+        mock_response.status_code = 429
+        mocker.patch("requests.get", return_value=mock_response)
+
+        api = WhoisAPI(api_token="test_token")
+        result = api.lookup("example.com")
+
+        assert result["status"] == "error"
+        assert result["error_type"] == "api_error"
+        assert "rate limit" in result["message"].lower()
+
+    def test_api_lookup_unauthorized(self, mocker):
+        """Test handling of unauthorized errors (bad API key)."""
+        mock_response = mocker.Mock()
+        mock_response.status_code = 401
+        mocker.patch("requests.get", return_value=mock_response)
+
+        api = WhoisAPI(api_token="bad_token")
+        result = api.lookup("example.com")
+
+        assert result["status"] == "error"
+        assert result["error_type"] == "api_error"
+        assert "API key invalid" in result["message"]
+
+    def test_api_lookup_timeout(self, mocker):
+        """Test handling of timeout errors."""
+        import requests
+        mocker.patch("requests.get", side_effect=requests.Timeout())
+
+        api = WhoisAPI(api_token="test_token")
+        result = api.lookup("example.com")
+
+        assert result["status"] == "error"
+        assert result["error_type"] == "api_error"
+        assert "timeout" in result["message"].lower()
