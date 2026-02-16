@@ -140,6 +140,7 @@ class WhoisAPI:
                 self.API_BASE_URL,
                 params={
                     "domain": domain,
+                    "r": "whois",
                     "apikey": self.api_token
                 },
                 timeout=self.TIMEOUT_SECONDS
@@ -171,19 +172,41 @@ class WhoisAPI:
 
             data = response.json()
 
+            # Check API status
+            if data.get("status") != 0:
+                return {
+                    "status": "error",
+                    "error_type": "api_error",
+                    "message": data.get("status_desc", "API error"),
+                    "suggested_action": "Check API status or try again later."
+                }
+
             # Parse response
-            if not data.get("domain_registered", True):
+            if not data.get("registered", True):
                 return {
                     "status": "available",
                     "domain": domain
                 }
             else:
+                # Extract registrant organization from contacts
+                registrant = "Unknown"
+                contacts = data.get("contacts", [])
+                for contact in contacts:
+                    if contact.get("type") == "registrant":
+                        registrant = contact.get("organization", contact.get("name", "Unknown"))
+                        break
+
+                # Format expiration date (extract just the date part)
+                expires = data.get("date_expires", "Unknown")
+                if expires != "Unknown" and " " in expires:
+                    expires = expires.split(" ")[0]
+
                 return {
                     "status": "taken",
                     "domain": domain,
-                    "registrant": data.get("registrant_name", "Unknown"),
-                    "expires": data.get("expiration_date", "Unknown"),
-                    "registrar": data.get("registrar_name", "Unknown")
+                    "registrant": registrant,
+                    "expires": expires,
+                    "registrar": data.get("registrar", "Unknown")
                 }
 
         except requests.Timeout:

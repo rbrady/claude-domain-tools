@@ -102,7 +102,7 @@ class TestWhoisAPI:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "status": 0,  # WhoAPI returns 0 for success
-            "domain_registered": False
+            "registered": False
         }
         mocker.patch("requests.get", return_value=mock_response)
 
@@ -118,10 +118,15 @@ class TestWhoisAPI:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "status": 0,
-            "domain_registered": True,
-            "registrant_name": "Example Corp",
-            "expiration_date": "2027-01-15",
-            "registrar_name": "Example Registrar Inc"
+            "registered": True,
+            "registrar": "Example Registrar Inc",
+            "date_expires": "2027-01-15 00:00:00",
+            "contacts": [
+                {
+                    "type": "registrant",
+                    "organization": "Example Corp"
+                }
+            ]
         }
         mocker.patch("requests.get", return_value=mock_response)
 
